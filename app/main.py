@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth, admin
+from .routers import auth, admin, inspector
 
 app = FastAPI(
     title="InspectShip API",
@@ -19,6 +19,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(inspector.router)
 
 @app.get("/")
 def root():

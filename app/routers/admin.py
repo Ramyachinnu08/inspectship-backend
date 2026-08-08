@@ -621,3 +621,67 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db), user: User = 
 @router.post("/auth/forgot-password")
 def forgot_password(payload: dict = Body(...)):
     return {"success": True, "message": "Reset link sent (demo)"}
+    # ═══════════ ANALYTICS ═══════════
+@router.get("/analytics")
+def get_analytics(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from ..models.vessel import Vessel
+    from ..models.fleet import Fleet
+    from ..models.template import Template
+    
+    total_vessels = db.query(Vessel).count()
+    total_fleets = db.query(Fleet).count()
+    total_templates = db.query(Template).count()
+    total_assignments = db.query(Assignment).count()
+    total_sessions = db.query(InspectionSession).count()
+    total_reports = db.query(Report).count()
+    total_capas = db.query(CAPA).count()
+    
+    # Assignments by status
+    status_counts = {}
+    for a in db.query(Assignment).all():
+        s = a.status.value if hasattr(a.status, 'value') else str(a.status)
+        status_counts[s] = status_counts.get(s, 0) + 1
+    
+    # CAPA by status
+    capa_counts = {}
+    for c in db.query(CAPA).all():
+        capa_counts[c.status] = capa_counts.get(c.status, 0) + 1
+    
+    # Reports by status
+    report_counts = {}
+    for r in db.query(Report).all():
+        report_counts[r.status] = report_counts.get(r.status, 0) + 1
+    
+    return {"success": True, "data": {
+        "totals": {
+            "vessels": total_vessels,
+            "fleets": total_fleets,
+            "templates": total_templates,
+            "assignments": total_assignments,
+            "sessions": total_sessions,
+            "reports": total_reports,
+            "capas": total_capas,
+        },
+        "assignments_by_status": status_counts,
+        "capa_by_status": capa_counts,
+        "reports_by_status": report_counts,
+    }}
+    # ═══════════ SETTINGS (generic key-value store) ═══════════
+@router.get("/settings/{key}")
+def get_setting(key: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    profile = db.query(Profile).filter(Profile.kind == "settings", Profile.name == key).first()
+    if not profile:
+        return {"success": True, "data": None}
+    return {"success": True, "data": profile.data}
+
+@router.put("/settings/{key}")
+def save_setting(key: str, payload: dict = Body(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    profile = db.query(Profile).filter(Profile.kind == "settings", Profile.name == key).first()
+    if not profile:
+        profile = Profile(kind="settings", name=key, data=payload)
+        db.add(profile)
+    else:
+        profile.data = payload
+    db.commit()
+    log_action(db, user, f"updated {key} settings", "settings", None)
+    return {"success": True, "data": payload}
