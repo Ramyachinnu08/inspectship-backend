@@ -13,6 +13,7 @@ from ..models.assignment import Assignment
 from ..models.template import Template
 from ..models.ca_library import CALibrary
 from ..models.session import InspectionSession
+from ..models.inspection import Inspection
 from ..models.report import Report
 from ..models.capa import CAPA
 from ..models.audit_log import AuditLog
@@ -434,6 +435,10 @@ def delete_assignment(assignment_id: int, db: Session = Depends(get_db), user: U
     a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not a:
         return {"success": False, "message": "Assignment not found"}
+    # Delete related records first (avoid foreign key errors)
+    db.query(Report).filter(Report.assignment_id == assignment_id).delete()
+    db.query(Inspection).filter(Inspection.assignment_id == assignment_id).delete()
+    db.query(InspectionSession).filter(InspectionSession.assignment_id == assignment_id).delete()
     db.delete(a)
     db.commit()
     log_action(db, user, "deleted assignment", "assignment", assignment_id)

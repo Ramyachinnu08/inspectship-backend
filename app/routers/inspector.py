@@ -161,3 +161,34 @@ def submit_inspection(inspection_id: int, db: Session = Depends(get_db), user: U
     db.commit()
     log_action(db, user, "submitted inspection", "inspection", inspection.id)
     return {"success": True, "data": {"report_id": report.id, "findings": findings}}
+    # ═══════════ GET INSPECTION DETAILS (for report viewer) ═══════════
+@router.get("/assignments/{assignment_id}/inspection")
+def get_inspection_detail(assignment_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.inspector_id == user.id
+    ).first()
+    if not assignment:
+        return {"success": False, "message": "Assignment not found"}
+    inspection = db.query(Inspection).filter(Inspection.assignment_id == assignment_id).first()
+    if not inspection:
+        return {"success": False, "message": "No inspection found"}
+    vessel = db.query(Vessel).filter(Vessel.id == assignment.vessel_id).first()
+    template = db.query(Template).filter(Template.id == assignment.template_id).first() if assignment.template_id else None
+    # Count findings
+    answers = inspection.answers or {}
+    findings = 0
+    for qid, val in answers.items():
+        if isinstance(val, dict) and val.get("answer") == "no":
+            findings += 1
+    return {"success": True, "data": {
+        "assignment_id": assignment.id,
+        "vessel": vessel.name if vessel else "Unknown",
+        "vessel_imo": vessel.imo if vessel else "",
+        "template": template.name if template else "",
+        "status": assignment.status.value,
+        "answers": answers,
+        "findings": findings,
+        "master_name": inspection.master_name,
+        "submitted_at": inspection.submitted_at.isoformat() if inspection.submitted_at else None,
+    }}
