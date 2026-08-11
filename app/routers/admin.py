@@ -444,6 +444,39 @@ def delete_assignment(assignment_id: int, db: Session = Depends(get_db), user: U
     log_action(db, user, "deleted assignment", "assignment", assignment_id)
     return {"success": True, "message": "Assignment deleted"}
 
+def _resolve_template(db, assignment):
+    if not assignment or not assignment.template_id:
+        return None
+    tid = assignment.template_id
+    try:
+        t = db.query(Template).filter(Template.id == int(tid)).first()
+        if t:
+            return t.name
+    except (ValueError, TypeError):
+        pass
+    t = db.query(Template).filter(Template.name == str(tid)).first()
+    if t:
+        return t.name
+    return str(tid)
+
+
+def _resolve_fleet(db, vessel):
+    """Fleet may be stored as numeric id or as a name string. Handle both."""
+    if not vessel or not vessel.fleet_id:
+        return None
+    fid = vessel.fleet_id
+    try:
+        f = db.query(Fleet).filter(Fleet.id == int(fid)).first()
+        if f:
+            return f.name
+    except (ValueError, TypeError):
+        pass
+    f = db.query(Fleet).filter(Fleet.name == str(fid)).first()
+    if f:
+        return f.name
+    return str(fid)
+
+
 # ============ SESSIONS ============
 @router.get("/admin/sessions")
 def list_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -453,15 +486,56 @@ def list_sessions(db: Session = Depends(get_db), user: User = Depends(get_curren
         inspector = db.query(User).filter(User.id == s.inspector_id).first()
         assignment = db.query(Assignment).filter(Assignment.id == s.assignment_id).first()
         vessel = db.query(Vessel).filter(Vessel.id == assignment.vessel_id).first() if assignment else None
+        fleet = _resolve_fleet(db, vessel)
+        template = _resolve_template(db, assignment)
         result.append({
             "id": s.id, "assignment_id": s.assignment_id,
             "inspector": inspector.name if inspector else None,
             "vessel": vessel.name if vessel else None,
+            "fleet": fleet if fleet else None,
+            "template": template if template else None,
             "status": s.status,
             "started_at": s.started_at.isoformat() if s.started_at else None,
             "completed_at": s.completed_at.isoformat() if s.completed_at else None,
         })
     return {"success": True, "data": result}
+
+@router.get("/admin/sessions/{session_id}/detail")
+def session_detail(session_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    session = db.query(InspectionSession).filter(InspectionSession.id == session_id).first()
+    if not session:
+        return {"success": False, "message": "Session not found"}
+    inspection = db.query(Inspection).filter(Inspection.assignment_id == session.assignment_id).first()
+    answers = inspection.answers if inspection and inspection.answers else {}
+    questions = []
+    evidence = []
+    for qid, val in answers.items():
+        if qid == "__cover_image__":
+            continue
+        if not isinstance(val, dict):
+            continue
+        q_text = val.get("question_text", qid)
+        ans = val.get("answer")
+        comment = val.get("comment", "")
+        questions.append({
+            "id": qid,
+            "question": q_text,
+            "answer": ans,
+            "comment": comment,
+            "is_finding": ans == "no",
+        })
+        # collect photos as evidence
+        photos = val.get("photos", [])
+        for i, p in enumerate(photos):
+            evidence.append({"question_id": qid, "question": q_text, "url": p})
+    return {"success": True, "data": {
+        "session_id": session.id,
+        "status": session.status,
+        "questions": questions,
+        "evidence": evidence,
+        "total_questions": len(questions),
+        "findings": len([q for q in questions if q["is_finding"]]),
+    }}
 
 # ============ REPORTS / REVIEW QUEUE ============
 @router.get("/admin/reports")
@@ -475,9 +549,13 @@ def list_reports(status: str = None, db: Session = Depends(get_db), user: User =
         assignment = db.query(Assignment).filter(Assignment.id == r.assignment_id).first()
         vessel = db.query(Vessel).filter(Vessel.id == assignment.vessel_id).first() if assignment else None
         inspector = db.query(User).filter(User.id == assignment.inspector_id).first() if assignment else None
+        template = _resolve_template(db, assignment)
+        fleet = _resolve_fleet(db, vessel)
         result.append({
             "id": r.id, "inspection_id": r.inspection_id, "assignment_id": r.assignment_id,
             "vessel": vessel.name if vessel else None,
+            "fleet": fleet if fleet else None,
+            "template": template if template else None,
             "inspector": inspector.name if inspector else None,
             "status": r.status, "findings_count": r.findings_count,
             "score": r.score, "review_notes": r.review_notes,
@@ -502,15 +580,26 @@ def review_report(report_id: int, payload: dict = Body(...), db: Session = Depen
 @router.get("/admin/capas")
 def list_capas(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     capas = db.query(CAPA).all()
-    return {"success": True, "data": [
-        {
+    result = []
+    for c in capas:
+        assignment = db.query(Assignment).filter(Assignment.id == c.assignment_id).first() if c.assignment_id else None
+        vessel = db.query(Vessel).filter(Vessel.id == assignment.vessel_id).first() if assignment else None
+        fleet = _resolve_fleet(db, vessel)
+        inspector = db.query(User).filter(User.id == assignment.inspector_id).first() if assignment else None
+        session = db.query(InspectionSession).filter(InspectionSession.assignment_id == c.assignment_id).first() if c.assignment_id else None
+        result.append({
             "id": c.id, "report_id": c.report_id, "assignment_id": c.assignment_id,
             "question_text": c.question_text, "finding": c.finding,
             "corrective_action": c.corrective_action, "status": c.status,
+            "vessel": vessel.name if vessel else None,
+            "fleet": fleet if fleet else None,
+            "severity": "Medium",
+            "session_id": session.id if session else None,
+            "assignee": inspector.name if inspector else None,
             "due_date": c.due_date.isoformat() if c.due_date else None,
             "created_at": c.created_at.isoformat() if c.created_at else None,
-        } for c in capas
-    ]}
+        })
+    return {"success": True, "data": result}
 
 @router.post("/admin/capas")
 def create_capa(payload: dict = Body(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):

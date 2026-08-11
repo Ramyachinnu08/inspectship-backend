@@ -141,7 +141,7 @@ def submit_inspection(inspection_id: int, db: Session = Depends(get_db), user: U
     report = Report(
         inspection_id=inspection.id,
         assignment_id=inspection.assignment_id,
-        status="pending_review",
+        status="approved",
         findings_count=findings,
     )
     db.add(report)
