@@ -39,9 +39,12 @@ def log_action(db, user, action, entity=None, entity_id=None, details=None):
 @router.get("/admin/fleets")
 def list_fleets(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     fleets = db.query(Fleet).all()
-    return {"success": True, "data": [
-        {"id": f.id, "name": f.name, "description": f.description} for f in fleets
-    ]}
+    all_vessels = db.query(Vessel).all()
+    data = []
+    for f in fleets:
+        count = sum(1 for v in all_vessels if str(v.fleet_id) == str(f.id) or str(v.fleet_id) == str(f.name))
+        data.append({"id": f.id, "name": f.name, "description": f.description, "vessel_count": count})
+    return {"success": True, "data": data}
 
 @router.post("/admin/fleets")
 def create_fleet(payload: dict = Body(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -710,11 +713,6 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db), user: User = 
     db.commit()
     log_action(db, user, "deleted profile", "profile", profile_id)
     return {"success": True, "message": "Profile deleted"}
-
-# ============ FORGOT PASSWORD (stub) ============
-@router.post("/auth/forgot-password")
-def forgot_password(payload: dict = Body(...)):
-    return {"success": True, "message": "Reset link sent (demo)"}
     # ═══════════ ANALYTICS ═══════════
 @router.get("/analytics")
 def get_analytics(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
