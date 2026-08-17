@@ -27,7 +27,7 @@ except Exception:
 
 # API key - set via env var or hard-code here (keep private!)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-MODEL = "gemini-3.5-flash"
+MODEL = "gemini-3.5-flash-lite"
 
 _client = None
 
@@ -69,6 +69,18 @@ def _image_part(image_b64: str):
     return types.Part.from_bytes(data=raw, mime_type="image/jpeg")
 
 
+def _fast_config():
+    """Config that minimises latency: minimal thinking + capped output."""
+    try:
+        from google.genai import types
+        return types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+            max_output_tokens=800,
+        )
+    except Exception:
+        return None
+
+
 def analyze_image(image_b64: str, question: str = "") -> dict:
     """Detect issues/problems in an inspection photo."""
     client = _get_client()
@@ -92,6 +104,7 @@ def analyze_image(image_b64: str, question: str = "") -> dict:
         resp = client.models.generate_content(
             model=MODEL,
             contents=[_image_part(image_b64), prompt],
+            config=_fast_config(),
         )
         text = resp.text or ""
         return {"success": True, "analysis": text, "raw": text}
@@ -124,6 +137,7 @@ def compare_images(before_b64: str, after_b64: str, context: str = "") -> dict:
         resp = client.models.generate_content(
             model=MODEL,
             contents=[_image_part(before_b64), _image_part(after_b64), prompt],
+            config=_fast_config(),
         )
         text = resp.text or ""
         return {"success": True, "comparison": text, "raw": text}
@@ -145,7 +159,11 @@ def ask_question(question: str, context: str = "") -> dict:
         if context:
             prompt += f"Context: {context}\n\n"
         prompt += f"Question: {question}"
-        resp = client.models.generate_content(model=MODEL, contents=[prompt])
+        resp = client.models.generate_content(
+            model=MODEL,
+            contents=[prompt],
+            config=_fast_config(),
+        )
         text = resp.text or ""
         return {"success": True, "answer": text}
     except Exception as e:

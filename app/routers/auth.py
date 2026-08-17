@@ -6,6 +6,7 @@ from ..core.security import hash_password, verify_password, create_access_token,
 from ..models.user import User, UserRole
 from ..schemas.user import UserRegister, UserLogin, UserResponse, Token
 import secrets
+import json
 from datetime import datetime, timedelta
 try:
     from ..core.email_utils import send_email, reset_password_html, is_configured
@@ -153,11 +154,21 @@ def totp_verify(
 
     totp = pyotp.TOTP(secret)
     if totp.verify(code, valid_window=1):
+        backup_codes = []
         if hasattr(current_user, "totp_enabled"):
             current_user.totp_secret = secret
             current_user.totp_enabled = True
+            # generate 8 backup codes, store hashed, return plaintext once
+            plain_codes = []
+            hashed_codes = []
+            for _ in range(8):
+                code_plain = f"{secrets.randbelow(10**4):04d}-{secrets.randbelow(10**4):04d}"
+                plain_codes.append(code_plain)
+                hashed_codes.append(hash_password(code_plain))
+            current_user.totp_backup_codes = json.dumps(hashed_codes)
+            backup_codes = plain_codes
             db.commit()
-        return {"success": True, "message": "Two-factor authentication enabled"}
+        return {"success": True, "message": "Two-factor authentication enabled", "backup_codes": backup_codes}
     return {"success": False, "message": "Invalid code. Try again."}
 
 @router.post("/totp/disable")
@@ -170,6 +181,95 @@ def totp_disable(
         current_user.totp_secret = None
         db.commit()
     return {"success": True, "message": "Two-factor authentication disabled"}
+
+
+@router.post("/totp/backup-codes/regenerate")
+def regenerate_backup_codes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Generate a fresh set of 8 backup codes (invalidates old ones)."""
+    if not getattr(current_user, "totp_enabled", False):
+        return {"success": False, "message": "Enable 2FA first"}
+    plain_codes = []
+    hashed_codes = []
+    for _ in range(8):
+        code_plain = f"{secrets.randbelow(10**4):04d}-{secrets.randbelow(10**4):04d}"
+        plain_codes.append(code_plain)
+        hashed_codes.append(hash_password(code_plain))
+    current_user.totp_backup_codes = json.dumps(hashed_codes)
+    db.commit()
+    return {"success": True, "backup_codes": plain_codes}
+
+
+@router.post("/totp/backup-codes/verify")
+def verify_backup_code(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Log in using a backup code (when authenticator is unavailable)."""
+    email = (payload.get("email") or "").strip().lower()
+    code = (payload.get("code") or "").strip()
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not getattr(user, "totp_backup_codes", None):
+        return {"success": False, "message": "Invalid code"}
+    try:
+        hashed_codes = json.loads(user.totp_backup_codes)
+    except Exception:
+        hashed_codes = []
+    for i, h in enumerate(hashed_codes):
+        if verify_password(code, h):
+            # consume the code (one-time use)
+            hashed_codes.pop(i)
+            user.totp_backup_codes = json.dumps(hashed_codes)
+            db.commit()
+            token = create_access_token({"sub": str(user.id), "role": user.role.value if hasattr(user.role, "value") else str(user.role)})
+            return {"success": True, "access_token": token, "token_type": "bearer",
+                    "remaining_codes": len(hashed_codes),
+                    "user": {"id": user.id, "email": user.email, "name": user.name,
+                             "role": user.role.value if hasattr(user.role, "value") else str(user.role)}}
+    return {"success": False, "message": "Invalid backup code"}
+
+
+# ─── Passkeys (WebAuthn) ───
+@router.post("/passkeys/save")
+def save_passkey(payload: dict = Body(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Store a registered passkey credential for this user."""
+    cred = payload.get("credential")
+    if not cred:
+        return {"success": False, "message": "No credential provided"}
+    try:
+        existing = json.loads(current_user.passkey_credentials) if current_user.passkey_credentials else []
+    except Exception:
+        existing = []
+    existing.append({"id": cred.get("id"), "name": payload.get("name", "Passkey"), "created": datetime.utcnow().isoformat()})
+    current_user.passkey_credentials = json.dumps(existing)
+    db.commit()
+    return {"success": True, "message": "Passkey saved", "count": len(existing)}
+
+
+@router.get("/passkeys/list")
+def list_passkeys(current_user: User = Depends(get_current_user)):
+    """List this user's registered passkeys."""
+    try:
+        existing = json.loads(current_user.passkey_credentials) if current_user.passkey_credentials else []
+    except Exception:
+        existing = []
+    return {"success": True, "passkeys": existing}
+
+
+@router.post("/passkeys/verify")
+def verify_passkey(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Log in with a passkey: match the credential id to a stored user."""
+    cred_id = payload.get("credential_id")
+    if not cred_id:
+        return {"success": False, "message": "No credential id"}
+    users = db.query(User).filter(User.passkey_credentials.isnot(None)).all()
+    for user in users:
+        try:
+            creds = json.loads(user.passkey_credentials)
+        except Exception:
+            creds = []
+        if any(cr.get("id") == cred_id for cr in creds):
+            token = create_access_token({"sub": str(user.id), "role": user.role.value if hasattr(user.role, "value") else str(user.role)})
+            return {"success": True, "access_token": token, "token_type": "bearer",
+                    "user": {"id": user.id, "email": user.email, "name": user.name,
+                             "role": user.role.value if hasattr(user.role, "value") else str(user.role)}}
+    return {"success": False, "message": "Passkey not recognized"}
 
 
 # ─── Password Reset (Forgot Password) ───────────────────

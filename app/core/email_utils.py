@@ -55,12 +55,12 @@ def reset_password_html(reset_link: str, expires_hours: int = 1) -> str:
     return f"""
     <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#111;">
       <div style="background:#1A2A5E;padding:20px;text-align:center;">
-        <span style="color:#FF6B00;font-weight:800;font-size:18px;letter-spacing:1px;">SEA SECURE</span>
+        <span style="color:#FF6B00;font-weight:800;font-size:18px;letter-spacing:1px;">RIGHTKNOT</span>
       </div>
       <div style="padding:28px 24px;">
         <h2 style="margin:0 0 12px;font-size:20px;">Reset your password</h2>
         <p style="font-size:14px;color:#374151;line-height:1.6;">
-          We received a request to reset the password for your Sea Secure inspector account.
+          We received a request to reset the password for your RightKnot inspector account.
         </p>
         <div style="text-align:center;margin:24px 0;">
           <a href="{reset_link}" style="background:#FF6B00;color:#fff;text-decoration:none;
@@ -74,7 +74,7 @@ def reset_password_html(reset_link: str, expires_hours: int = 1) -> str:
         </p>
       </div>
       <div style="background:#F3F4F6;padding:16px;text-align:center;font-size:12px;color:#9CA3AF;">
-        © 2026 Sea Secure Shipping. All rights reserved.
+        © 2026 RightKnot Shipping. All rights reserved.
       </div>
     </div>
     """
