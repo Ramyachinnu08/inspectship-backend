@@ -206,29 +206,56 @@ def delete_question(question_id: int, db: Session = Depends(get_db), user: User 
     log_action(db, user, "deleted question", "question", question_id)
     return {"success": True, "message": "Question deleted"}
 
+@router.post("/admin/questions/bulk-delete")
+def bulk_delete_questions(payload: dict = Body(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return {"success": True, "deleted": 0}
+    deleted = db.query(QuestionBank).filter(QuestionBank.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    log_action(db, user, f"bulk deleted {deleted} questions", "question")
+    return {"success": True, "deleted": deleted}
+
 @router.post("/admin/questions/bulk-upload")
 async def bulk_upload_questions(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     content = await file.read()
     text = content.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
     count = 0
+    skipped = 0
+
+    def norm_key(k: str) -> str:
+        # "SUB NO", "Sub Number", "sub_number" -> "subno" / "subnumber"
+        return (k or "").strip().lower().replace(" ", "").replace("_", "").replace(".", "")
+
+    def get_val(row_n: dict, *names) -> str:
+        for n in names:
+            v = row_n.get(n)
+            if v is not None and str(v).strip() != "":
+                return str(v).strip()
+        return ""
+
     for row in reader:
+        row_n = {norm_key(k): v for k, v in row.items()}
+        question_text = get_val(row_n, "question", "questions", "questiontext")
+        if not question_text:
+            skipped += 1
+            continue
         q = QuestionBank(
-            question=row.get("question") or row.get("Question") or "",
-            sub_number=row.get("sub_number") or row.get("Sub Number"),
-            category=row.get("category") or row.get("Category"),
-            sub_area=row.get("sub_area") or row.get("Sub Area"),
-            severity=row.get("severity") or row.get("Severity"),
-            type=row.get("type") or row.get("Type"),
-            evidence_required=(row.get("evidence_required") or "").lower() in ("true", "yes", "1"),
-            guide_to_inspection=row.get("guide_to_inspection") or row.get("Guide"),
+            question=question_text,
+            sub_number=get_val(row_n, "subnumber", "subno", "subnum", "number") or None,
+            category=get_val(row_n, "category", "section", "area") or None,
+            sub_area=get_val(row_n, "subarea", "subsection") or None,
+            severity=get_val(row_n, "severity", "risk") or None,
+            type=get_val(row_n, "type", "questiontype", "answertype") or None,
+            evidence_required=get_val(row_n, "evidencerequired", "evidence").lower() in ("true", "yes", "1"),
+            guide_to_inspection=get_val(row_n, "guidetoinspection", "guide", "guidance") or None,
         )
-        if q.question:
-            db.add(q)
-            count += 1
+        db.add(q)
+        count += 1
     db.commit()
     log_action(db, user, f"bulk uploaded {count} questions", "question")
-    return {"success": True, "message": f"{count} questions uploaded"}
+    return {"success": True, "message": f"{count} questions uploaded", "imported": count, "skipped": skipped}
 
 # ============ TEMPLATES ============
 @router.get("/admin/templates")

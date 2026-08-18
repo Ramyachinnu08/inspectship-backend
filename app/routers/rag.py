@@ -67,6 +67,21 @@ def list_documents(db: Session = Depends(get_db), user: User = Depends(get_curre
     ]}
 
 
+@router.get("/api/rag/offline-pack")
+def offline_pack(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Full knowledge base (titles + chunks) so the mobile app can cache it for offline answering."""
+    import json as _json
+    docs = db.query(KnowledgeDocument).order_by(KnowledgeDocument.created_at.desc()).all()
+    out = []
+    for d in docs:
+        try:
+            chunks = _json.loads(d.chunks) if d.chunks else []
+        except Exception:
+            chunks = []
+        out.append({"id": d.id, "title": d.title, "chunks": chunks})
+    return {"success": True, "documents": out}
+
+
 @router.delete("/api/rag/documents/{doc_id}")
 def delete_document(doc_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     doc = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == doc_id).first()
