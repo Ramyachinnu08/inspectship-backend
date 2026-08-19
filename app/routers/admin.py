@@ -249,7 +249,7 @@ async def bulk_upload_questions(file: UploadFile = File(...), db: Session = Depe
             severity=get_val(row_n, "severity", "risk") or None,
             type=get_val(row_n, "type", "questiontype", "answertype") or None,
             evidence_required=get_val(row_n, "evidencerequired", "evidence").lower() in ("true", "yes", "1"),
-            guide_to_inspection=get_val(row_n, "guidetoinspection", "guide", "guidance") or None,
+            guide_to_inspection=get_val(row_n, "guidetoinspection", "inspectionguide", "guide", "guidance") or None,
         )
         db.add(q)
         count += 1
