@@ -76,6 +76,9 @@ def _fast_config():
         return types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(thinking_level="minimal"),
             max_output_tokens=800,
+            # temperature 0 -> consistent, repeatable answers for the
+            # same question instead of different wording every time
+            temperature=0.0,
         )
     except Exception:
         return None

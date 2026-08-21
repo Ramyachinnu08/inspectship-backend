@@ -116,7 +116,7 @@ def rag_ask(payload: dict = Body(...), db: Session = Depends(get_db), user: User
         return result
 
     # retrieve relevant chunks
-    relevant = rag_service.retrieve(question, all_chunks, top_k=4)
+    relevant = rag_service.retrieve(question, all_chunks, top_k=6)
     if not relevant:
         result = ai_service.ask_question(question)
         result["grounded"] = False
