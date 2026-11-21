@@ -9,3 +9,4 @@ passlib[bcrypt]
 python-multipart
 python-dotenv
 google-genai
+email-validator
