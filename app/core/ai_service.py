@@ -171,3 +171,36 @@ def ask_question(question: str, context: str = "") -> dict:
         return {"success": True, "answer": text}
     except Exception as e:
         return {"success": False, "message": f"AI question failed: {e}"}
+
+def fix_grammar(text: str) -> dict:
+    """Correct spelling/grammar of inspector-typed text without changing its meaning."""
+    client = _get_client()
+    if client is None:
+        return {"success": False, "message": "AI not configured. Add GEMINI_API_KEY."}
+    text = (text or "").strip()
+    if len(text) < 3:
+        return {"success": True, "text": text}
+    try:
+        prompt = (
+            "You are an editor for a formal marine vessel inspection report (RightShip style).\n"
+            "Correct ONLY the spelling, grammar, punctuation and word order of the text below so it "
+            "reads as proper professional English.\n"
+            "RULES:\n"
+            "- Keep the inspector's meaning exactly. Do NOT add, remove or invent any fact, number, "
+            "equipment, name or location.\n"
+            "- Keep it the same length (roughly). Do NOT expand, explain or add recommendations.\n"
+            "- If the text is a question, keep it a question. If it is a statement, keep past tense.\n"
+            "- Keep maritime abbreviations (SMS, PMS, SOLAS, MARPOL, C/O, C/E, OOW) unchanged.\n"
+            "- If the text is already correct, return it unchanged.\n"
+            "- Output ONLY the corrected text. No quotes, no explanation, no markdown.\n\n"
+            f"Text: {text}"
+        )
+        resp = client.models.generate_content(
+            model=MODEL, contents=[prompt], config=_fast_config(),
+        )
+        out = (resp.text or "").strip().strip('"').strip()
+        if not out:
+            out = text
+        return {"success": True, "text": out}
+    except Exception as e:
+        return {"success": False, "message": f"AI grammar fix failed: {e}"}

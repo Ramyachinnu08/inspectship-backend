@@ -441,7 +441,26 @@ def create_assignment(payload: dict = Body(...), db: Session = Depends(get_db), 
     db.commit()
     db.refresh(assignment)
     log_action(db, user, "created assignment", "assignment", assignment.id)
-    return {"success": True, "data": {"id": assignment.id}}
+    # Notify the inspector by email (best effort - never blocks creation)
+    emailed = False
+    try:
+        from ..core.email_utils import send_email, assignment_created_html
+        inspector = db.query(User).filter(User.id == assignment.inspector_id).first()
+        vessel = db.query(Vessel).filter(Vessel.id == assignment.vessel_id).first()
+        tmpl = db.query(Template).filter(Template.id == assignment.template_id).first() if assignment.template_id else None
+        if inspector and inspector.email:
+            emailed = send_email(
+                inspector.email,
+                f"New inspection assignment: {vessel.name if vessel else 'Vessel'}",
+                assignment_created_html(
+                    inspector.name, vessel.name if vessel else "", vessel.imo if vessel else "",
+                    payload.get("port") or getattr(assignment, "port", None),
+                    due_date.strftime("%d/%m/%Y") if due_date else None,
+                    tmpl.name if tmpl else None, assignment.notes),
+            )
+    except Exception as e:
+        print(f"[email] assignment notification failed: {e}")
+    return {"success": True, "data": {"id": assignment.id, "emailed": emailed}}
 
 @router.patch("/admin/assignments/{assignment_id}")
 def update_assignment(assignment_id: int, payload: dict = Body(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):

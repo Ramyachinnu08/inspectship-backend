@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from datetime import datetime
 from ..core.database import get_db
-from ..models.user import User
+from ..models.user import User, UserRole
 from ..models.vessel import Vessel
 from ..models.template import Template
 from ..models.assignment import Assignment, AssignmentStatus
@@ -192,3 +192,40 @@ def get_inspection_detail(assignment_id: int, db: Session = Depends(get_db), use
         "master_name": inspection.master_name,
         "submitted_at": inspection.submitted_at.isoformat() if inspection.submitted_at else None,
     }}
+
+
+@router.post("/inspections/{inspection_id}/email-report")
+async def email_report(inspection_id: int, file: UploadFile = File(...), findings: str = Form("0"),
+                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Email the app-generated PDF report to the admin and the vessel Master."""
+    from ..core.email_utils import send_email, report_submitted_html, is_configured, ADMIN_EMAIL
+    inspection = db.query(Inspection).filter(Inspection.id == inspection_id).first()
+    if not inspection:
+        return {"success": False, "message": "Inspection not found"}
+    if not is_configured():
+        return {"success": False, "message": "Email not configured on server (SMTP_USER / SMTP_PASSWORD)"}
+    assignment = db.query(Assignment).filter(Assignment.id == inspection.assignment_id).first()
+    vessel = db.query(Vessel).filter(Vessel.id == assignment.vessel_id).first() if assignment else None
+
+    recipients = []
+    if ADMIN_EMAIL:
+        recipients += [e.strip() for e in ADMIN_EMAIL.split(",") if e.strip()]
+    else:
+        admins = db.query(User).filter(User.role.in_([UserRole.admin, UserRole.super_admin])).all()
+        recipients += [a.email for a in admins if a.email]
+    if inspection.master_email:
+        recipients.append(inspection.master_email.strip())
+    recipients = list(dict.fromkeys([r for r in recipients if r]))
+    if not recipients:
+        return {"success": False, "message": "No recipient email (set ADMIN_EMAIL or Master email)"}
+
+    pdf_bytes = await file.read()
+    vname = vessel.name if vessel else "Vessel"
+    fname = file.filename or f"{vname.replace(' ', '_')}_Inspection_Report.pdf"
+    when = (inspection.submitted_at or datetime.utcnow()).strftime("%d/%m/%Y")
+    html = report_submitted_html(vname, vessel.imo if vessel else "", getattr(assignment, "port", None),
+                                 user.name, when, findings, getattr(inspection, "master_name", None))
+    sent = send_email(recipients, f"Inspection report - {vname} - {when}", html, [(fname, pdf_bytes, "pdf")])
+    log_action(db, user, "emailed report", "inspection", inspection_id, details=", ".join(recipients))
+    return {"success": sent, "recipients": recipients,
+            "message": "Report emailed" if sent else "Email sending failed - check server SMTP settings"}

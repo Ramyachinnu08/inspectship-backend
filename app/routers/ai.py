@@ -5,6 +5,7 @@ Routes (mounted under /api via main.py or with the /api prefix in paths):
   POST /api/ai/analyze-image   { image, question? }
   POST /api/ai/compare-images  { before, after, context? }
   POST /api/ai/ask             { question, context? }
+  POST /api/ai/fix-grammar     { text } -> corrected text
   GET  /api/ai/status          -> whether AI is configured
 """
 from fastapi import APIRouter, Body, Depends
@@ -48,3 +49,11 @@ def ask(payload: dict = Body(...), user: User = Depends(get_current_user)):
     if not question:
         return {"success": False, "message": "No question provided"}
     return ai_service.ask_question(question, context)
+
+
+@router.post("/api/ai/fix-grammar")
+def fix_grammar(payload: dict = Body(...), user: User = Depends(get_current_user)):
+    text = payload.get("text") or ""
+    if not text.strip():
+        return {"success": True, "text": text}
+    return ai_service.fix_grammar(text)
