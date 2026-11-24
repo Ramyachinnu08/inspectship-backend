@@ -10,3 +10,4 @@ python-multipart
 python-dotenv
 google-genai
 email-validator
+bcrypt==4.0.1
